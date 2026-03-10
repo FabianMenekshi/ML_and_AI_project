@@ -19,3 +19,5 @@ Core challenge: create new detail without inventing nonsense; avoid flicker.
 Input: blurry/noisy video
 Output: sharper/cleaner video at same resolution
 Core challenge: sharpen without ringing/ghosting; keep temporal stability.
+
+- Direction C - NLP with Qwen model 3.5 that uses 4/9 billion parameters to run(fine-tune for secpficic task on laptop. 
