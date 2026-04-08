@@ -1,0 +1,1 @@
+This project is done as part of the practical assessment for the course 30562 "Machine Learning and Artificial Intelliegence" at Bocconi University. 
