@@ -2,3 +2,15 @@ data/
 .venv/
 __pycache__/
 *.pyc
+project_ideas.txt
+data/tokenizers
+__pycache__/
+.DS_Store
+modded-nanogpt/
+modded-nanogpt
+data/datasets
+data/manifest.json
+data/docs_selected.jsonl
+.mypy_cache/
+.venv
+logs/
