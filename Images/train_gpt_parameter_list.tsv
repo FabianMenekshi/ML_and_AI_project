@@ -1,0 +1,93 @@
+name	shape	params
+skip_weights	[4, 512]	2048
+tok_emb.weight	[1024, 512]	524288
+blocks.0.attn_scale	[512]	512
+blocks.0.mlp_scale	[512]	512
+blocks.0.resid_mix	[2, 512]	1024
+blocks.0.attn.q_gain	[8]	8
+blocks.0.attn.c_q.weight	[512, 512]	262144
+blocks.0.attn.c_k.weight	[256, 512]	131072
+blocks.0.attn.c_v.weight	[256, 512]	131072
+blocks.0.attn.proj.weight	[512, 512]	262144
+blocks.0.mlp.fc.weight	[1024, 512]	524288
+blocks.0.mlp.proj.weight	[512, 1024]	524288
+blocks.1.attn_scale	[512]	512
+blocks.1.mlp_scale	[512]	512
+blocks.1.resid_mix	[2, 512]	1024
+blocks.1.attn.q_gain	[8]	8
+blocks.1.attn.c_q.weight	[512, 512]	262144
+blocks.1.attn.c_k.weight	[256, 512]	131072
+blocks.1.attn.c_v.weight	[256, 512]	131072
+blocks.1.attn.proj.weight	[512, 512]	262144
+blocks.1.mlp.fc.weight	[1024, 512]	524288
+blocks.1.mlp.proj.weight	[512, 1024]	524288
+blocks.2.attn_scale	[512]	512
+blocks.2.mlp_scale	[512]	512
+blocks.2.resid_mix	[2, 512]	1024
+blocks.2.attn.q_gain	[8]	8
+blocks.2.attn.c_q.weight	[512, 512]	262144
+blocks.2.attn.c_k.weight	[256, 512]	131072
+blocks.2.attn.c_v.weight	[256, 512]	131072
+blocks.2.attn.proj.weight	[512, 512]	262144
+blocks.2.mlp.fc.weight	[1024, 512]	524288
+blocks.2.mlp.proj.weight	[512, 1024]	524288
+blocks.3.attn_scale	[512]	512
+blocks.3.mlp_scale	[512]	512
+blocks.3.resid_mix	[2, 512]	1024
+blocks.3.attn.q_gain	[8]	8
+blocks.3.attn.c_q.weight	[512, 512]	262144
+blocks.3.attn.c_k.weight	[256, 512]	131072
+blocks.3.attn.c_v.weight	[256, 512]	131072
+blocks.3.attn.proj.weight	[512, 512]	262144
+blocks.3.mlp.fc.weight	[1024, 512]	524288
+blocks.3.mlp.proj.weight	[512, 1024]	524288
+blocks.4.attn_scale	[512]	512
+blocks.4.mlp_scale	[512]	512
+blocks.4.resid_mix	[2, 512]	1024
+blocks.4.attn.q_gain	[8]	8
+blocks.4.attn.c_q.weight	[512, 512]	262144
+blocks.4.attn.c_k.weight	[256, 512]	131072
+blocks.4.attn.c_v.weight	[256, 512]	131072
+blocks.4.attn.proj.weight	[512, 512]	262144
+blocks.4.mlp.fc.weight	[1024, 512]	524288
+blocks.4.mlp.proj.weight	[512, 1024]	524288
+blocks.5.attn_scale	[512]	512
+blocks.5.mlp_scale	[512]	512
+blocks.5.resid_mix	[2, 512]	1024
+blocks.5.attn.q_gain	[8]	8
+blocks.5.attn.c_q.weight	[512, 512]	262144
+blocks.5.attn.c_k.weight	[256, 512]	131072
+blocks.5.attn.c_v.weight	[256, 512]	131072
+blocks.5.attn.proj.weight	[512, 512]	262144
+blocks.5.mlp.fc.weight	[1024, 512]	524288
+blocks.5.mlp.proj.weight	[512, 1024]	524288
+blocks.6.attn_scale	[512]	512
+blocks.6.mlp_scale	[512]	512
+blocks.6.resid_mix	[2, 512]	1024
+blocks.6.attn.q_gain	[8]	8
+blocks.6.attn.c_q.weight	[512, 512]	262144
+blocks.6.attn.c_k.weight	[256, 512]	131072
+blocks.6.attn.c_v.weight	[256, 512]	131072
+blocks.6.attn.proj.weight	[512, 512]	262144
+blocks.6.mlp.fc.weight	[1024, 512]	524288
+blocks.6.mlp.proj.weight	[512, 1024]	524288
+blocks.7.attn_scale	[512]	512
+blocks.7.mlp_scale	[512]	512
+blocks.7.resid_mix	[2, 512]	1024
+blocks.7.attn.q_gain	[8]	8
+blocks.7.attn.c_q.weight	[512, 512]	262144
+blocks.7.attn.c_k.weight	[256, 512]	131072
+blocks.7.attn.c_v.weight	[256, 512]	131072
+blocks.7.attn.proj.weight	[512, 512]	262144
+blocks.7.mlp.fc.weight	[1024, 512]	524288
+blocks.7.mlp.proj.weight	[512, 1024]	524288
+blocks.8.attn_scale	[512]	512
+blocks.8.mlp_scale	[512]	512
+blocks.8.resid_mix	[2, 512]	1024
+blocks.8.attn.q_gain	[8]	8
+blocks.8.attn.c_q.weight	[512, 512]	262144
+blocks.8.attn.c_k.weight	[256, 512]	131072
+blocks.8.attn.c_v.weight	[256, 512]	131072
+blocks.8.attn.proj.weight	[512, 512]	262144
+blocks.8.mlp.fc.weight	[1024, 512]	524288
+blocks.8.mlp.proj.weight	[512, 1024]	524288
