@@ -1,6 +1,6 @@
 This project is done as part of the practical assessment for the course 30562 "Machine Learning and Artificial Intelliegence" at Bocconi University. 
 
-# train_gpt.py model architecture
+# Baseline model architecture
 ![Architecture diagram](Images/BaselineModel_Diagram.jpg)
 ## Default model configuration
 - vocab size: 1024
