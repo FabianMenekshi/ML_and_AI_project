@@ -1152,7 +1152,16 @@ def main() -> None:
         log0(f"final_int8_zlib_roundtrip_exact val_loss:{q_val_loss:.8f} val_bpb:{q_val_bpb:.8f}")
 
         if master_process:
-            wandb.log({"final_val_loss": q_val_loss, "final_val_bpb": q_val_bpb})
+            wandb.log({
+                "final_val_loss": q_val_loss,
+                "final_val_bpb": q_val_bpb,
+                "quant_file_bytes": quant_file_bytes,
+                "quant_compression_ratio": quant_stats["baseline_tensor_bytes"] / max(quant_stats["int8_payload_bytes"], 1),
+                "quant_param_count": quant_stats["param_count"],
+                "quant_num_float_tensors": quant_stats["num_float_tensors"],
+                "quant_baseline_bytes": quant_stats["baseline_tensor_bytes"],
+                "quant_int8_payload_bytes": quant_stats["int8_payload_bytes"],
+            })
             wandb.finish()
 
         # Free GPU memory between seeds
