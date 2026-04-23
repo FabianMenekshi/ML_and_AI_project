@@ -2,15 +2,14 @@
 #SBATCH --job-name=run_golf
 #SBATCH --output=/home/3199937/slurm_logs/first_run_golf_%j.out
 #SBATCH --error=/home/3199937/slurm_logs/first_run_golf_%j.err
+#SBATCH --account=3199937
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --account=3199937
 #SBATCH --partition=stud
 #SBATCH --qos=stud
 #SBATCH --gpus=1
 
-mkdir -p /home/3199937/slurm_logs
 module load miniconda3
 
 eval "$(conda shell.bash hook)"
