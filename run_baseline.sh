@@ -17,8 +17,9 @@ eval "$(conda shell.bash hook)"
 conda activate golf
 python --version
 
-RUN_ID=golf_baseline_antonio \
-ITERATIONS=15000 \
+RUN_ID=golf_baseline_antonio_new \
+ITERATIONS=5000 \
 MAX_WALLCLOCK_SECONDS=0 \
-VAL_LOSS_EVERY=1000 \
+TRAIN_BATCH_TOKENS=131072 \
+VAL_LOSS_EVERY=500 \
 python3 train_gpt.py
