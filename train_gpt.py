@@ -930,7 +930,7 @@ def main() -> None:
             run_config["run_id"] = run_id
             wandb.init(
                 project="ml_ai_project",
-                entity="the_golfers",
+                entity="the-golfers",
                 name=run_id,
                 config=run_config,
             )
