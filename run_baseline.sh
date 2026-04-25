@@ -20,6 +20,7 @@ python --version
 RUN_ID=golf_baseline_antonio_new \
 ITERATIONS=5000 \
 MAX_WALLCLOCK_SECONDS=0 \
+WARMDOWN_ITERS=750 \
 TRAIN_BATCH_TOKENS=131072 \
 VAL_LOSS_EVERY=500 \
 python3 train_gpt.py
