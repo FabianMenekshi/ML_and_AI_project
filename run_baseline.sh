@@ -8,7 +8,7 @@
 #SBATCH --account=3199937
 #SBATCH --partition=stud
 #SBATCH --qos=stud
-#SBATCH --gpus=2
+#SBATCH --gpus=1
 
 mkdir -p /home/3199937/slurm_logs
 module load miniconda3
