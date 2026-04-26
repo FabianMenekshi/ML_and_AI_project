@@ -1109,6 +1109,11 @@ def main() -> None:
     # With 4 PSL values × 2 modes (train/eval) = 8, we need to raise the default limit of 8.
     torch._dynamo.config.recompile_limit = 64
 
+    # Inductor bug: FusedMixOrderReductions assertion fires in backward when parallel
+    # residual lanes create mixed reduction patterns. Forcing eager realization of
+    # intermediate tensors disables the problematic fusion and sidesteps the crash.
+    torch._inductor.config.realize_opcount_threshold = 0
+
     logfile = None
     if master_process:
         os.makedirs("logs", exist_ok=True)
