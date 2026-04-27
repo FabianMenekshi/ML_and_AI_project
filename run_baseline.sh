@@ -14,7 +14,7 @@ mkdir -p /home/3246712/slurm_logs
 module load miniconda3
 
 eval "$(conda shell.bash hook)"
-conda activate golf
+conda activate MLproject
 python --version
 
 RUN_ID=golf_baseline_kevin \
