@@ -127,7 +127,7 @@ class Muon(torch.optim.Optimizer):
         distributed = dist.is_available() and dist.is_initialized()
         world_size = dist.get_world_size() if distributed else 1
         rank = dist.get_rank() if distributed else 0
-
+#a
         for group in self.param_groups:
             params = group["params"]
             if not params:
