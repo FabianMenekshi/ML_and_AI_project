@@ -162,15 +162,14 @@ class Muon(torch.optim.Optimizer):
             if distributed:
                 dist.all_reduce(updates_flat, op=dist.ReduceOp.SUM)
 
-            # Track the norm of the orthogonalised update vector (before lr scaling).
-            # Multiply by lr here so the reported norm matches the actual param-space step size.
-            self.last_update_norm = float((updates_flat.float().norm() * lr).item())
-
             curr = 0
             for p in params:
                 g = updates_flat[curr : curr + p.numel()].view_as(p).to(dtype=p.dtype)
                 p.add_(g, alpha=-lr)
                 curr += p.numel()
+
+            # Compute norm after the update so the CPU sync doesn't precede gradient application.
+            self.last_update_norm = float((updates_flat.float().norm() * lr).item())
 
         return loss
 

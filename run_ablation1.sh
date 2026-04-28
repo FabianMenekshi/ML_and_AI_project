@@ -18,7 +18,7 @@ conda activate golf
 python --version
 
 RUN_ID=ablation1_matrix_lr \
-MATRIX_LR_VALUES=0.02,0.04,0.06,0.08 \
+MATRIX_LR_VALUES=0.04,0.02,0.06,0.08 \
 SEEDS=1337 \
 ITERATIONS=5000 \
 TRAIN_BATCH_TOKENS=131072 \
