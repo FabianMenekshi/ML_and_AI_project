@@ -63,6 +63,10 @@ class Hyperparameters:
         int(v) for v in os.environ.get("PARALLEL_START_LAYER_VALUES", "-1,7,4,0").split(",")
     ]
 
+    # When True, initialise post_lambdas asymmetrically so each sublayer writes
+    # only to its own lane (attn→lane0=1, attn→lane1=0, mlp→lane0=0, mlp→lane1=1).
+    parallel_asym_init = bool(int(os.environ.get("PARALLEL_ASYM_INIT", "0")))
+
     val_batch_size = int(os.environ.get("VAL_BATCH_SIZE", 524_288))
     val_loss_every = int(os.environ.get("VAL_LOSS_EVERY", 500))
     train_log_every = int(os.environ.get("TRAIN_LOG_EVERY", 200))
@@ -597,6 +601,7 @@ class GPT(nn.Module):
         rope_base: float,
         qk_gain_init: float,
         parallel_start_layer: int = -1,
+        parallel_asym_init: bool = False,
     ):
         super().__init__()
         self.tie_embeddings = tie_embeddings
@@ -627,9 +632,11 @@ class GPT(nn.Module):
             # parallel_post_lambdas[layer, sublayer, lane]:
             #   sublayer 0 = after attention, sublayer 1 = after MLP
             #   lane 0 = contribution to lane0, lane 1 = contribution to lane1
-            self.parallel_post_lambdas = nn.Parameter(
-                torch.ones(num_layers, 2, 2, dtype=torch.float32)
-            )
+            post_init = torch.ones(num_layers, 2, 2, dtype=torch.float32)
+            if parallel_asym_init:
+                post_init[:, 0, 1] = 0.0  # attn → lane1
+                post_init[:, 1, 0] = 0.0  # mlp  → lane0
+            self.parallel_post_lambdas = nn.Parameter(post_init)
             # parallel_resid_lambdas[layer, sublayer]: residual scale for each lane.
             # Initialise slightly above 1 (sqrt(1.1)) following the leaderboard entry.
             self.parallel_resid_lambdas = nn.Parameter(
@@ -751,6 +758,7 @@ def run_one(
     args: Hyperparameters,
     parallel_start_layer: int,
     seed: int,
+    parallel_asym_init: bool,
     rank: int,
     world_size: int,
     local_rank: int,
@@ -802,6 +810,7 @@ def run_one(
         rope_base=args.rope_base,
         qk_gain_init=args.qk_gain_init,
         parallel_start_layer=parallel_start_layer,
+        parallel_asym_init=parallel_asym_init,
     ).to(device).bfloat16()
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1145,7 +1154,8 @@ def main() -> None:
 
     for psl in args.parallel_start_layer_values:
         for seed in args.seeds:
-            run_one(args=args, parallel_start_layer=psl, seed=seed, **shared)
+            run_one(args=args, parallel_start_layer=psl, seed=seed,
+                    parallel_asym_init=args.parallel_asym_init, **shared)
 
     if distributed:
         dist.destroy_process_group()
