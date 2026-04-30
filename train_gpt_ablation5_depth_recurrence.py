@@ -1076,6 +1076,10 @@ def main() -> None:
     enable_flash_sdp(True)
     enable_mem_efficient_sdp(False)
     enable_math_sdp(False)
+    # Each (recur_layers config × grad_mode) pair produces a distinct compiled graph.
+    # With N layer configs × 2 grad modes (training vs inference_mode), we exceed the
+    # default limit of 8. Set a generous ceiling so the sweep runs without errors.
+    torch._dynamo.config.recompile_limit = 64
 
     logfile = None
     if master_process:
