@@ -39,6 +39,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 # - 524,288 train tokens per step for 20,000 iterations with a ~10 minute cap
 
 class Hyperparameters:
+    #Attn Residuals diagnostics
+    attn_diag_log_every = int(os.environ.get("ATTN_DIAG_LOG_EVERY", 200))
+    attn_snapshot_every = int(os.environ.get("ATTN_SNAPSHOT_EVERY", 1000))
+
     # Data paths are shard globs produced by the existing preprocessing pipeline.
     data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp1024")
     train_files = os.path.join(data_path, "fineweb_train_*.bin")
@@ -626,14 +630,26 @@ class BlockAttentionResidual(nn.Module):
         self.proj = nn.Linear(dim, 1, bias=False)
         nn.init.zeros_(self.proj.weight)
 
+        # Cached diagnostics from the most recent forward pass
+        self.last_weights: Tensor | None = None           # [num_sources, B, T]
+        self.last_logits: Tensor | None = None            # [num_sources, B, T]
+        self.last_num_encoder_sources: int = 0
+
     def forward(self, blocks: list[Tensor], partial_block: Tensor) -> Tensor:
+        # blocks = encoder skip states
+        # partial_block = current decoder state
         sources = blocks + [partial_block]
-        v = torch.stack(sources, dim=0)
+        v = torch.stack(sources, dim=0)                   # [S, B, T, D]
         k = self.norm(v)
-        logits = self.proj.weight[:, 0].new_zeros((v.size(0), v.size(1), v.size(2)))
-        logits = torch.einsum('d,nbtd->nbt', self.proj.weight[:, 0].to(dtype=k.dtype), k)
-        weights = logits.softmax(dim=0)
-        return torch.einsum('nbt,nbtd->btd', weights, v)
+        logits = torch.einsum("d,sbtd->sbt", self.proj.weight[:, 0].to(dtype=k.dtype), k)
+        weights = logits.softmax(dim=0)                   # [S, B, T]
+
+        # cache for diagnostics (detach to avoid graph retention)
+        self.last_weights = weights.detach()
+        self.last_logits = logits.detach()
+        self.last_num_encoder_sources = len(blocks)
+
+        return torch.einsum("sbt,sbtd->btd", weights, v)
 
 
 class Block(nn.Module):
@@ -718,25 +734,44 @@ class GPT(nn.Module):
             if isinstance(module, nn.Linear) and getattr(module, "_zero_init", False):
                 nn.init.zeros_(module.weight)
 
-    def forward(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
+    def forward(self,
+        input_ids: Tensor,
+        target_ids: Tensor,
+        return_diagnostics: bool = False,
+    ) -> Tensor | tuple[Tensor, dict[str, list[Tensor]]]:
         x = self.tok_emb(input_ids)
         x = F.rms_norm(x, (x.size(-1),))
         x0 = x
         skips: list[Tensor] = []
 
-        # First half stores encoder states; second half replaces additive skip connections
-        # with block attention residual aggregation over remaining encoder states plus the
-        # current decoder state, following the paper's block-level attention idea.
+        hidden_norms: dict[str, list[Tensor]] = defaultdict(list)
+        if return_diagnostics:
+            hidden_norms["embed"].append(tensor_l2_norm(x))
+
+        # Encoder
         for i in range(self.num_encoder_layers):
             x = self.blocks[i](x, x0)
             skips.append(x)
+            if return_diagnostics:
+                hidden_norms[f"encoder_block_{i}"].append(tensor_l2_norm(x))
+
+        # Decoder
         for i in range(self.num_decoder_layers):
             if skips:
                 x = self.skip_attn_res[i](skips, x)
+                if return_diagnostics:
+                    hidden_norms[f"decoder_skipmerge_{i}"].append(tensor_l2_norm(x))
                 skips.pop()
-            x = self.blocks[self.num_encoder_layers + i](x, x0)
 
-        x = self.final_norm(x).reshape(-1, x.size(-1))
+            x = self.blocks[self.num_encoder_layers + i](x, x0)
+            if return_diagnostics:
+                hidden_norms[f"decoder_block_{i}"].append(tensor_l2_norm(x))
+
+        x = self.final_norm(x)
+        if return_diagnostics:
+            hidden_norms["final_norm"].append(tensor_l2_norm(x))
+
+        x = x.reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
         if self.tie_embeddings:
             logits_proj = F.linear(x, self.tok_emb.weight)
@@ -745,8 +780,143 @@ class GPT(nn.Module):
                 raise RuntimeError("lm_head is required when tie_embeddings=False")
             logits_proj = self.lm_head(x)
         logits = self.logit_softcap * torch.tanh(logits_proj / self.logit_softcap)
-        return F.cross_entropy(logits.float(), targets, reduction="mean")
+        loss = F.cross_entropy(logits.float(), targets, reduction="mean")
 
+        if return_diagnostics:
+            return loss, hidden_norms
+        return loss
+    
+
+# -----------------------------
+# HELPER FUNCTIONs for WandB tracking
+# ----------------------------- 
+
+def tensor_l2_norm(x: Tensor) -> Tensor:
+    # Returns mean token-wise L2 norm over batch and time.
+    return x.float().norm(dim=-1).mean()
+
+
+@torch.no_grad()
+def summarize_skip_attention_stats(model: nn.Module) -> dict[str, float]:
+    """
+    Summarize the most recent skip-attention weights cached in base_model.skip_attn_res.
+    Returns scalar metrics suitable for wandb.log.
+    """
+    stats: dict[str, float] = {}
+    modules = getattr(model, "skip_attn_res", None)
+    if modules is None:
+        return stats
+
+    mean_entropy = []
+    mean_decoder_mass = []
+    mean_encoder_mass = []
+    source_mass_sums: dict[int, list[float]] = defaultdict(list)
+
+    for layer_idx, mod in enumerate(modules):
+        if mod.last_weights is None:
+            continue
+
+        w = mod.last_weights.float()  # [S, B, T]
+        s = w.size(0)
+        if s == 0:
+            continue
+
+        # Mean attention per source index within this layer
+        per_source_mean = w.mean(dim=(1, 2))  # [S]
+        for src_idx in range(s):
+            value = float(per_source_mean[src_idx].item())
+            stats[f"skip_attn/layer_{layer_idx}/source_{src_idx}_mean_weight"] = value
+            source_mass_sums[src_idx].append(value)
+
+        # Entropy of source distribution
+        entropy = -(w.clamp_min(1e-12) * w.clamp_min(1e-12).log()).sum(dim=0).mean()
+        stats[f"skip_attn/layer_{layer_idx}/entropy"] = float(entropy.item())
+        mean_entropy.append(float(entropy.item()))
+
+        # Fraction of mass on current decoder state vs encoder skip states
+        decoder_mass = w[-1].mean()
+        encoder_mass = w[:-1].sum(dim=0).mean() if s > 1 else torch.zeros((), device=w.device)
+        stats[f"skip_attn/layer_{layer_idx}/decoder_mass"] = float(decoder_mass.item())
+        stats[f"skip_attn/layer_{layer_idx}/encoder_mass"] = float(encoder_mass.item())
+        mean_decoder_mass.append(float(decoder_mass.item()))
+        mean_encoder_mass.append(float(encoder_mass.item()))
+
+    # Aggregate over layers
+    if mean_entropy:
+        stats["skip_attn/entropy_mean_over_layers"] = float(sum(mean_entropy) / len(mean_entropy))
+    if mean_decoder_mass:
+        stats["skip_attn/decoder_mass_mean_over_layers"] = float(sum(mean_decoder_mass) / len(mean_decoder_mass))
+    if mean_encoder_mass:
+        stats["skip_attn/encoder_mass_mean_over_layers"] = float(sum(mean_encoder_mass) / len(mean_encoder_mass))
+
+    for src_idx, vals in source_mass_sums.items():
+        stats[f"skip_attn/source_{src_idx}_mean_weight_over_layers"] = float(sum(vals) / len(vals))
+
+    return stats
+
+
+@torch.no_grad()
+def summarize_hidden_norm_stats(hidden_norms: dict[str, list[Tensor]]) -> dict[str, float]:
+    """
+    hidden_norms contains lists of scalar tensors collected during forward.
+    """
+    out: dict[str, float] = {}
+    for name, values in hidden_norms.items():
+        if not values:
+            continue
+        stacked = torch.stack([v.float().detach() for v in values])
+        out[f"hidden_norm/{name}_mean"] = float(stacked.mean().item())
+        out[f"hidden_norm/{name}_std"] = float(stacked.std(unbiased=False).item())
+    return out
+
+
+@torch.no_grad()
+def summarize_attnres_grad_norms(model: nn.Module) -> dict[str, float]:
+    """
+    Gradient norms only for attention-residual parameters.
+    """
+    stats: dict[str, float] = {}
+    total_sq = 0.0
+    count = 0
+
+    for layer_idx, mod in enumerate(getattr(model, "skip_attn_res", [])):
+        for pname, p in mod.named_parameters():
+            if p.grad is None:
+                continue
+            gnorm = float(p.grad.detach().float().norm().item())
+            stats[f"grad_norm/skip_attn/layer_{layer_idx}/{pname}"] = gnorm
+            total_sq += gnorm ** 2
+            count += 1
+
+    if count > 0:
+        stats["grad_norm/skip_attn/global"] = total_sq ** 0.5
+        stats["grad_norm/skip_attn/num_params_with_grad"] = float(count)
+
+    return stats
+
+
+@torch.no_grad()
+def build_skip_weight_snapshot_table(model: nn.Module, step: int):
+    """
+    Builds a W&B table with one row per (layer, source) for the latest cached source weights.
+    """
+    rows = []
+    for layer_idx, mod in enumerate(getattr(model, "skip_attn_res", [])):
+        if mod.last_weights is None:
+            continue
+        w = mod.last_weights.float().mean(dim=(1, 2))  # [S]
+        num_enc = mod.last_num_encoder_sources
+        for src_idx in range(w.numel()):
+            source_type = "decoder_state" if src_idx == w.numel() - 1 else "encoder_skip"
+            rows.append([step, layer_idx, src_idx, source_type, float(w[src_idx].item()), num_enc])
+
+    if not rows:
+        return None
+
+    return wandb.Table(
+        columns=["step", "layer", "source_index", "source_type", "mean_weight", "num_encoder_sources"],
+        data=rows,
+    )
 
 # -----------------------------
 # TRAINING
@@ -1063,12 +1233,22 @@ def main() -> None:
                 if distributed:
                     model.require_backward_grad_sync = micro_step == grad_accum_steps - 1
                 x, y = train_loader.next_batch(args.train_batch_tokens, args.train_seq_len, grad_accum_steps)
+                hidden_diag_for_log = None
                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
-                    loss = model(x, y)
+                    if micro_step == grad_accum_steps - 1:
+                        loss_out = model(x, y, return_diagnostics=True)
+                        loss, hidden_diag_for_log = loss_out
+                    else:
+                        loss = model(x, y)
+
                 train_loss += loss.detach()
                 (loss * grad_scale).backward()
-            train_loss /= grad_accum_steps
-
+                train_loss /= grad_accum_steps
+                # with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=True):
+                #     loss = model(x, y)
+                # train_loss += loss.detach()
+                # (loss * grad_scale).backward()
+                # New Attn Residual Tracking
             frac = min(step / args.muon_momentum_warmup_steps, 1.0) if args.muon_momentum_warmup_steps > 0 else 1.0
             muon_momentum = (1 - frac) * args.muon_momentum_warmup_start + frac * args.muon_momentum
             for group in optimizer_muon.param_groups:
@@ -1096,7 +1276,32 @@ def main() -> None:
                     f"train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms / step:.2f}ms"
                 )
                 if master_process:
-                    wandb.log({"train_loss": train_loss.item(), "lr_scale": scale, "tokens_seen": step * args.train_batch_tokens}, step=step)
+                    log_payload = {
+                        "train_loss": train_loss.item(),
+                        "lr_scale": scale,
+                        "tokens_seen": step * args.train_batch_tokens,
+                    }
+
+                    should_log_attn_diag = args.attn_diag_log_every > 0 and (
+                        step <= 10 or step % args.attn_diag_log_every == 0
+                    )
+                    if should_log_attn_diag:
+                        if hidden_diag_for_log is not None:
+                            log_payload.update(summarize_hidden_norm_stats(hidden_diag_for_log))
+                        log_payload.update(summarize_skip_attention_stats(base_model))
+                        log_payload.update(summarize_attnres_grad_norms(base_model))
+
+                    wandb.log(log_payload, step=step)
+
+                    should_log_snapshot = args.attn_snapshot_every > 0 and (
+                        step == 0 or step % args.attn_snapshot_every == 0
+                    )
+                    if should_log_snapshot:
+                        snapshot_table = build_skip_weight_snapshot_table(base_model, step)
+                        if snapshot_table is not None:
+                            wandb.log({"skip_attn/source_weight_snapshot": snapshot_table}, step=step)
+                # if master_process:
+                #     wandb.log({"train_loss": train_loss.item(), "lr_scale": scale, "tokens_seen": step * args.train_batch_tokens}, step=step)
 
             # Needed to sync whether we've reached the wallclock cap.
             reached_cap = max_wallclock_ms is not None and approx_training_time_ms >= max_wallclock_ms
