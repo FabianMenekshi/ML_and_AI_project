@@ -70,6 +70,8 @@ class Hyperparameters:
     tie_embeddings = bool(int(os.environ.get("TIE_EMBEDDINGS", "1")))
     rope_base = float(os.environ.get("ROPE_BASE", 10000.0))
     logit_softcap = float(os.environ.get("LOGIT_SOFTCAP", 30.0))
+    # (XSA) Costs zero parameters; toggle off to run the plain baseline for ablation.
+    use_xsa = bool(int(os.environ.get("USE_XSA", "1")))
 
     # Optimizer hyperparameters.
     embed_lr = float(os.environ.get("EMBED_LR", 0.6))
@@ -561,6 +563,7 @@ class CausalSelfAttention(nn.Module):
         num_kv_heads: int,
         rope_base: float,
         qk_gain_init: float,
+        use_xsa: bool = False,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -580,6 +583,8 @@ class CausalSelfAttention(nn.Module):
         self.proj._zero_init = True
         self.q_gain = nn.Parameter(torch.full((num_heads,), qk_gain_init, dtype=torch.float32))
         self.rotary = Rotary(self.head_dim, base=rope_base)
+        # XSA flag — stored so forward() can branch without an extra argument.
+        self.use_xsa = use_xsa
 
     def forward(self, x: Tensor) -> Tensor:
         bsz, seqlen, dim = x.shape
@@ -600,6 +605,29 @@ class CausalSelfAttention(nn.Module):
             is_causal=True,
             enable_gqa=(self.num_kv_heads != self.num_heads),
         )
+
+        if self.use_xsa:
+            # Expand v from num_kv_heads to num_heads to match the SDPA output y.
+            # Each group of (num_heads // num_kv_heads) query heads shares one KV head.
+            if self.num_kv_heads != self.num_heads:
+                groups = self.num_heads // self.num_kv_heads
+                # repeat_interleave repeats each KV head `groups` times along dim=1,
+                # mirroring how the SDPA kernel internally expands KV for GQA.
+                v_full = v.repeat_interleave(groups, dim=1)  # [B, num_heads, T, head_dim]
+            else:
+                v_full = v  # standard MHA: no expansion needed
+
+            # L2-normalize along the head_dim axis to get unit self-value vectors.
+            # eps in normalize prevents division by zero for near-zero value vectors.
+            v_hat = F.normalize(v_full, dim=-1)  # [B, num_heads, T, head_dim]
+
+            # Scalar projection of each attention output onto its self-value direction.
+            # keepdim=True lets us broadcast the subtraction back over head_dim.
+            proj_scalar = (y * v_hat).sum(dim=-1, keepdim=True)  # [B, num_heads, T, 1]
+
+            # Remove the self-value component — the residual is orthogonal to v̂_i.
+            y = y - proj_scalar * v_hat  # [B, num_heads, T, head_dim]
+
         y = y.transpose(1, 2).contiguous().reshape(bsz, seqlen, dim)
         return self.proj(y)
 
@@ -626,12 +654,14 @@ class Block(nn.Module):
         num_kv_heads: int,
         mlp_mult: int,
         rope_base: float,
-        qk_gain_init: float
+        qk_gain_init: float,
+        use_xsa: bool = False,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
-        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
+        # Pass use_xsa down so the attention module can apply the XSA projection.
+        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init, use_xsa=use_xsa)
         self.mlp = MLP(dim, mlp_mult)
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
@@ -660,6 +690,7 @@ class GPT(nn.Module):
         logit_softcap: float,
         rope_base: float,
         qk_gain_init: float,
+        use_xsa: bool = False,
     ):
         super().__init__()
         if logit_softcap <= 0.0:
@@ -681,6 +712,7 @@ class GPT(nn.Module):
                     mlp_mult,
                     rope_base,
                     qk_gain_init,
+                    use_xsa=use_xsa,
                 )
                 for i in range(num_layers)
             ]
@@ -850,6 +882,7 @@ def main() -> None:
             logit_softcap=args.logit_softcap,
             rope_base=args.rope_base,
             qk_gain_init=args.qk_gain_init,
+            use_xsa=args.use_xsa,
         ).to(device).bfloat16()
         for module in base_model.modules():
             if isinstance(module, CastedLinear):
