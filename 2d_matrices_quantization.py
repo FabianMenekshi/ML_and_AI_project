@@ -307,6 +307,7 @@ INT8_KEEP_FLOAT_STORE_DTYPE = torch.float16
 INT8_PER_ROW_SCALE_DTYPE = torch.float16
 INT8_CLIP_PERCENTILE = 99.99984
 INT8_CLIP_Q = INT8_CLIP_PERCENTILE / 100.0
+MATRIX_QUANT_BITS = int(os.environ.get("MATRIX_QUANT_BITS", 8))
 
 def tensor_nbytes(t: Tensor) -> int:
     return int(t.numel()) * int(t.element_size())
@@ -319,7 +320,7 @@ def keep_float_tensor(name: str, t: Tensor, passthrough_orig_dtypes: dict[str, s
         return t.to(dtype=INT8_KEEP_FLOAT_STORE_DTYPE).contiguous()
     return t
 
-def quantize_float_tensor(t: Tensor) -> tuple[Tensor, Tensor]:
+def quantize_float_tensor(t: Tensor, matrix_bits: int=8) -> tuple[Tensor, Tensor]:
     t32 = t.float()
     if t32.ndim == 2:
         # Matrices get one scale per row, which usually tracks output-channel
@@ -329,9 +330,10 @@ def quantize_float_tensor(t: Tensor) -> tuple[Tensor, Tensor]:
             if t32.numel()
             else torch.empty((t32.shape[0],), dtype=torch.float32)
         )
+        max_val = 2**(matrix_bits - 1) - 1
         clipped = torch.maximum(torch.minimum(t32, clip_abs[:, None]), -clip_abs[:, None])
-        scale = (clip_abs / 127.0).clamp_min(1.0 / 127.0)
-        q = torch.clamp(torch.round(clipped / scale[:, None]), -127, 127).to(torch.int8).contiguous()
+        scale = (clip_abs / max_val).clamp_min(1.0 / max_val)
+        q = torch.clamp(torch.round(clipped / scale[:, None]), -max_val, max_val).to(torch.int8).contiguous()
         return q, scale.to(dtype=INT8_PER_ROW_SCALE_DTYPE).contiguous()
 
     # Vectors / scalars use a simpler per-tensor scale.
@@ -378,7 +380,7 @@ def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
             continue
 
         stats["num_float_tensors"] += 1
-        q, s = quantize_float_tensor(t)
+        q, s = quantize_float_tensor(t, matrix_bits= MATRIX_QUANT_BITS)
         if s.ndim > 0:
             qmeta[name] = {"scheme": "per_row", "axis": 0}
         quantized[name] = q
@@ -928,6 +930,7 @@ def main() -> None:
             run_config = {k: getattr(args, k) for k in vars(Hyperparameters) if not k.startswith("_")}
             run_config["seed"] = seed
             run_config["run_id"] = run_id
+            run_config["matrix_quant_bits"] = MATRIX_QUANT_BITS
             wandb.init(
                 project="ml_ai_project",
                 entity="the-golfers",
