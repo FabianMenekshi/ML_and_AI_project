@@ -86,7 +86,6 @@ class Hyperparameters:
     beta2 = float(os.environ.get("BETA2", 0.95))
     adam_eps = float(os.environ.get("ADAM_EPS", 1e-8))
     grad_clip_norm = float(os.environ.get("GRAD_CLIP_NORM", 0.0))
-    QUANTIZE_ALL = int(os.environ.get("QUANTIZE_ALL", 0))
 # -----------------------------
 # MUON OPTIMIZER 
 # -----------------------------
@@ -308,7 +307,7 @@ INT8_PER_ROW_SCALE_DTYPE = torch.float16
 INT8_CLIP_PERCENTILE = 99.99984
 INT8_CLIP_Q = INT8_CLIP_PERCENTILE / 100.0
 MATRIX_QUANT_BITS = int(os.environ.get("MATRIX_QUANT_BITS", 8))
-
+QUANTIZE_ALL = bool(int(os.environ.get("QUANTIZE_ALL", 0)))
 def tensor_nbytes(t: Tensor) -> int:
     return int(t.numel()) * int(t.element_size())
 
@@ -1109,7 +1108,7 @@ def main() -> None:
             log0(f"Code size: {code_bytes} bytes")
             log0(f"Total submission size: {model_bytes + code_bytes} bytes")
 
-        quant_obj, quant_stats = quantize_state_dict_int8(base_model.state_dict())
+        quant_obj, quant_stats = quantize_state_dict_int8(base_model.state_dict(), quantize_all= QUANTIZE_ALL)
         quant_buf = io.BytesIO()
         torch.save(quant_obj, quant_buf)
         quant_raw = quant_buf.getvalue()

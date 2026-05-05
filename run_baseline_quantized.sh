@@ -23,6 +23,6 @@ MAX_WALLCLOCK_SECONDS=0 \
 WARMDOWN_ITERS=750 \
 TRAIN_BATCH_TOKENS=131072 \
 VAL_LOSS_EVERY=500 \
-QUANTIZE_ALL=True \
+QUANTIZE_ALL=1 \
 MATRIX_QUANT_BITS=8 \
-python3 train_gpt.py
+python3 ablation_baseline_full_quantization.py
