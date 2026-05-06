@@ -321,6 +321,7 @@ def keep_float_tensor(name: str, t: Tensor, passthrough_orig_dtypes: dict[str, s
 
 def quantize_float_tensor(t: Tensor, matrix_bits: int=8) -> tuple[Tensor, Tensor]:
     t32 = t.float()
+    max_val = 2**(matrix_bits - 1) - 1
     if t32.ndim == 2:
         # Matrices get one scale per row, which usually tracks output-channel
         # ranges much better than a single tensor-wide scale.
@@ -329,7 +330,6 @@ def quantize_float_tensor(t: Tensor, matrix_bits: int=8) -> tuple[Tensor, Tensor
             if t32.numel()
             else torch.empty((t32.shape[0],), dtype=torch.float32)
         )
-        max_val = 2**(matrix_bits - 1) - 1
         clipped = torch.maximum(torch.minimum(t32, clip_abs[:, None]), -clip_abs[:, None])
         scale = (clip_abs / max_val).clamp_min(1.0 / max_val)
         q = torch.clamp(torch.round(clipped / scale[:, None]), -max_val, max_val).to(torch.int8).contiguous()
@@ -337,8 +337,8 @@ def quantize_float_tensor(t: Tensor, matrix_bits: int=8) -> tuple[Tensor, Tensor
 
     # Vectors / scalars use a simpler per-tensor scale.
     clip_abs = float(torch.quantile(t32.abs().flatten(), INT8_CLIP_Q).item()) if t32.numel() else 0.0
-    scale = torch.tensor(clip_abs / 127.0 if clip_abs > 0 else 1.0, dtype=torch.float32)
-    q = torch.clamp(torch.round(torch.clamp(t32, -clip_abs, clip_abs) / scale), -127, 127).to(torch.int8).contiguous()
+    scale = torch.tensor(clip_abs / max_val if clip_abs > 0 else 1.0, dtype=torch.float32)
+    q = torch.clamp(torch.round(torch.clamp(t32, -clip_abs, clip_abs) / scale), -max_val, max_val).to(torch.int8).contiguous()
     return q, scale
 
 def quantize_state_dict_int8(state_dict: dict[str, Tensor], quantize_all: bool = False):

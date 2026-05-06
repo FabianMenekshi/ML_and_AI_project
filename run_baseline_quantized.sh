@@ -17,7 +17,7 @@ eval "$(conda shell.bash hook)"
 conda activate golf
 python --version
 
-RUN_ID=ablation_full_quantization \
+RUN_ID=ablation_full_quantization_correct \
 ITERATIONS=5000 \
 MAX_WALLCLOCK_SECONDS=0 \
 WARMDOWN_ITERS=750 \
