@@ -12,9 +12,9 @@
 
 mkdir -p /home/3241043/slurm_logs
 module load miniconda3
-
 eval "$(conda shell.bash hook)"
 conda activate golf
+export WANDB_DIR=/mnt/beegfsstudents/home/3241043/wandb
 python --version
 
 for BITS in 8 4; do
