@@ -930,6 +930,7 @@ def main() -> None:
             run_config = {k: getattr(args, k) for k in vars(Hyperparameters) if not k.startswith("_")}
             run_config["seed"] = seed
             run_config["run_id"] = run_id
+            run_config["matrix_quant_bits"] = MATRIX_QUANT_BITS
             wandb.init(
                 project="ml_ai_project",
                 entity="the-golfers",
