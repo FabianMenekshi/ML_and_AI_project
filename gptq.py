@@ -63,26 +63,50 @@ def gptq_quantize_weight(
     scale = (clip_abs / max_val).clamp_min(1.0 / max_val)
 
     # --- Prepare Hessian inverse ---
-    H = hessian.float().clone()
+    # Work in float64 for numerical stability of the Cholesky factorization.
+    # float32 frequently fails on Hessians that are positive-definite in exact
+    # arithmetic but get pushed slightly negative by rounding error.
+    H = hessian.double().clone()
+    n = H.shape[0]
+    diag_idx = torch.arange(n, device=H.device)
 
-    # Damping: add a small value to the diagonal for numerical stability.
-    # This prevents issues when the Hessian is singular or near-singular.
-    damp = percdamp * torch.diag(H).mean()
-    H.diagonal().add_(damp)
+    # Handle "dead" input channels: if a column of the calibration input was
+    # always zero for some channel, the corresponding diagonal of H is zero,
+    # which makes H rank-deficient. Set those diagonals to 1 and zero out the
+    # matching weight columns so they contribute nothing.
+    dead = torch.diag(H) == 0
+    if dead.any():
+        H[diag_idx[dead], diag_idx[dead]] = 1.0
+        W[:, dead] = 0
 
-    # Compute the Cholesky decomposition of H, then invert.
-    # Using Cholesky because H is symmetric positive definite (after damping).
-    try:
-        L = torch.linalg.cholesky(H)
-        H_inv = torch.cholesky_inverse(L)
-    except torch.linalg.LinAlgError:
-        # Fallback: if Cholesky fails, add more damping and retry
-        H.diagonal().add_(damp * 10)
-        L = torch.linalg.cholesky(H)
-        H_inv = torch.cholesky_inverse(L)
+    # Damping with escalating retries: try percdamp, then 10x, 100x, 1000x.
+    # If all fail, the Hessian is severely degenerate and we raise.
+    mean_diag = torch.diag(H).mean().item()
+    H_orig = H.clone()
+    L = None
+    for damp_mult in (percdamp, percdamp * 10, percdamp * 100, percdamp * 1000):
+        H = H_orig.clone()
+        damp = damp_mult * mean_diag
+        H[diag_idx, diag_idx] += damp
+        try:
+            L = torch.linalg.cholesky(H)
+            break
+        except torch._C._LinAlgError:
+            continue
+
+    if L is None:
+        raise RuntimeError(
+            f"Cholesky failed even with percdamp={percdamp * 1000}. "
+            "Hessian is severely degenerate — check calibration data."
+        )
+
+    H_inv = torch.cholesky_inverse(L)
 
     # Get the Cholesky decomposition of H_inv (used for efficient block updates)
     H_inv_cho = torch.linalg.cholesky(H_inv, upper=True)
+
+    # Cast back to float32 for the quantization loop (matches W's dtype)
+    H_inv_cho = H_inv_cho.float()
 
     # --- Quantize column by column, in blocks ---
     Q = torch.zeros_like(W)
