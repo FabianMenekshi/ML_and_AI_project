@@ -308,6 +308,8 @@ INT8_PER_ROW_SCALE_DTYPE = torch.float16
 INT8_CLIP_PERCENTILE = 99.99984
 INT8_CLIP_Q = INT8_CLIP_PERCENTILE / 100.0
 
+print(f"DEBUG QUANTIZATION PATTERNS: {INT8_KEEP_FLOAT_FP32_NAME_PATTERNS}")
+
 def tensor_nbytes(t: Tensor) -> int:
     return int(t.numel()) * int(t.element_size())
 
@@ -371,7 +373,10 @@ def quantize_state_dict_int8(state_dict: dict[str, Tensor]):
 
         # Small float tensors are cheap enough to keep directly. We still downcast
         # fp32/bf16 passthrough tensors to fp16 so metadata does not dominate size.
-        if t.numel() <= INT8_KEEP_FLOAT_MAX_NUMEL:
+        # Also keep tensors matching high-precision patterns.
+        is_high_precision_layer = any(pattern in name for pattern in INT8_KEEP_FLOAT_FP32_NAME_PATTERNS)
+
+        if t.numel() <= INT8_KEEP_FLOAT_MAX_NUMEL or is_high_precision_layer:
             kept = keep_float_tensor(name, t, passthrough_orig_dtypes)
             passthrough[name] = kept
             stats["int8_payload_bytes"] += tensor_nbytes(kept)

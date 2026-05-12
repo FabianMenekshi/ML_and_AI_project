@@ -9,3 +9,13 @@ data/docs_selected.jsonl
 .mypy_cache/
 .venv
 logs/
+
+# Model checkpoints / trained models
+*.pt
+*.pth
+*.ckpt
+*.ptz
+*.safetensors
+
+# Experiment tracking
+wandb/

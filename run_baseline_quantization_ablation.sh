@@ -11,16 +11,18 @@
 #SBATCH --gpus=1
 
 mkdir -p /home/3259119/slurm_logs
-# module load miniconda3
+module load miniconda3
 
-# eval "$(conda shell.bash hook)"
-# conda activate golf
+eval "$(conda shell.bash hook)"
+conda activate golf
 python --version
 
-RUN_ID=golf_baseline_giulio_quantization_\
+mkdir -p "$WANDB_DIR"
+
+RUN_ID=golf_baseline_quantiztion_no_firsttransformerblock \
 ITERATIONS=5000 \
 MAX_WALLCLOCK_SECONDS=0 \
 WARMDOWN_ITERS=750 \
 TRAIN_BATCH_TOKENS=131072 \
 VAL_LOSS_EVERY=500 \
-python3 train_gpt.py
+python3 train_gpt_quantize_no_firsttransformerblock.py
