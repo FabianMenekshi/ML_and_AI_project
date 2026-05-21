@@ -318,6 +318,7 @@ QUANT_ASYMMETRIC = int(os.environ.get("QUANT_ASYMMETRIC", 1))
 QAT_ENABLED = int(os.environ.get("QAT_ENABLED", 0))
 QAT_START_FRACTION = float(os.environ.get("QAT_START_FRACTION", 0.75))
 QAT_BITS = int(os.environ.get("QAT_BITS", 6))
+QAT_EMBED_BITS = int(os.environ.get("QAT_EMBED_BITS", 7))
 QAT_GROUP_SIZE = int(os.environ.get("QAT_GROUP_SIZE", 32))
 
 def tensor_nbytes(t: Tensor) -> int:
@@ -519,17 +520,36 @@ class RMSNorm(nn.Module):
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
 
-def fake_quantize(w: Tensor, bits: int = 6, group_size: int = 32) -> Tensor:
-    """Fake quantize-dequantize with straight-through estimator.
+def fake_quantize_symmetric(w: Tensor, bits: int = 7) -> Tensor:
+    """Fake symmetric per-row quantize-dequantize with STE.
 
-    Forward: returns dequantized weights (simulates quantization damage).
-    Backward: gradients pass through as if rounding never happened (STE).
+    Used for embeddings (int7). Matches the symmetric per-row
+    quantization used in post-training for the embedding matrix.
     """
     max_val = 2 ** (bits - 1) - 1
-    orig_shape = w.shape
 
-    # Reshape into groups for per-group scale
+    # Per-row scale (symmetric: centered at zero)
+    scale = w.abs().amax(dim=1, keepdim=True) / max_val
+    scale = scale.clamp_min(1e-8)
+
+    # Quantize and dequantize
+    q = (w / scale).round().clamp(-max_val, max_val)
+    w_dequant = q * scale
+
+    # STE: forward uses quantized, backward passes gradients through
+    return w + (w_dequant - w).detach()
+
+
+def fake_quantize_asymmetric(w: Tensor, bits: int = 6, group_size: int = 32) -> Tensor:
+    """Fake asymmetric group-wise quantize-dequantize with STE.
+
+    Used for attention/MLP matrices (int6). Matches the asymmetric
+    group-wise quantization used in post-training with GROUP=32.
+    """
+    max_val = 2 ** bits - 1  # asymmetric uses [0, max_val]
     out_features, in_features = w.shape
+
+    # Pad if needed
     num_groups = math.ceil(in_features / group_size)
     padded = num_groups * group_size
     if padded > in_features:
@@ -539,21 +559,28 @@ def fake_quantize(w: Tensor, bits: int = 6, group_size: int = 32) -> Tensor:
 
     w_grouped = w_padded.reshape(out_features, num_groups, group_size)
 
-    # Per-group symmetric scale
-    scale = w_grouped.abs().amax(dim=2, keepdim=True) / max_val
-    scale = scale.clamp_min(1e-8)
+    # Per-group min/max (asymmetric)
+    w_min = w_grouped.amin(dim=2, keepdim=True)
+    w_max = w_grouped.amax(dim=2, keepdim=True)
 
-    # Quantize and dequantize
-    q = (w_grouped / scale).round().clamp(-max_val, max_val)
-    w_dequant = (q * scale).reshape(out_features, padded)[:, :in_features].contiguous()
+    # Scale and zero-point
+    scale = ((w_max - w_min) / max_val).clamp_min(1e-8)
+    zero_point = (-w_min / scale).round().clamp(0, max_val)
 
-    # STE: forward uses quantized weights, backward passes gradients to original w
+    # Quantize to [0, max_val] and dequantize back
+    q = (w_grouped / scale + zero_point).round().clamp(0, max_val)
+    w_dequant = (q - zero_point) * scale
+
+    # Reshape back, trim padding
+    w_dequant = w_dequant.reshape(out_features, padded)[:, :in_features].contiguous()
+
+    # STE
     return w + (w_dequant - w).detach()
 
 
 class CastedLinear(nn.Linear):
     # Keep weights in fp32 for optimizer/state quality, cast at matmul time for bf16 compute.
-    # QAT: when enabled, simulates quantization during forward pass.
+    # QAT: when enabled, simulates asymmetric group-wise quantization (int6) during forward.
     _qat_enabled = False
     _qat_bits = 6
     _qat_group_size = 32
@@ -562,8 +589,8 @@ class CastedLinear(nn.Linear):
         w = self.weight.to(x.dtype)
 
         if self.training and CastedLinear._qat_enabled:
-            w = fake_quantize(w, bits=CastedLinear._qat_bits,
-                              group_size=CastedLinear._qat_group_size)
+            w = fake_quantize_asymmetric(w, bits=CastedLinear._qat_bits,
+                                         group_size=CastedLinear._qat_group_size)
 
         bias = self.bias.to(x.dtype) if self.bias is not None else None
         return F.linear(x, w, bias)
@@ -771,7 +798,10 @@ class GPT(nn.Module):
         x = self.final_norm(x).reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
         if self.tie_embeddings:
-            logits_proj = F.linear(x, self.tok_emb.weight)
+            embed_w = self.tok_emb.weight
+            if self.training and CastedLinear._qat_enabled:
+                embed_w = fake_quantize_symmetric(embed_w.to(x.dtype), bits=QAT_EMBED_BITS)
+            logits_proj = F.linear(x, embed_w)
         else:
             if self.lm_head is None:
                 raise RuntimeError("lm_head is required when tie_embeddings=False")
@@ -994,6 +1024,7 @@ def main() -> None:
             run_config["qat_enabled"] = QAT_ENABLED
             run_config["qat_start_fraction"] = QAT_START_FRACTION
             run_config["qat_bits"] = QAT_BITS
+            run_config["qat_embed_bits"] = QAT_EMBED_BITS
             run_config["qat_group_size"] = QAT_GROUP_SIZE
             wandb.init(
                 project="ml_ai_project",
