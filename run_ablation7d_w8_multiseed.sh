@@ -35,6 +35,16 @@ python --version
 # runs share a wandb regex with the existing seed-1337 run from abl7c — the notebook
 # picks up the full 3-seed grid via ^ablation7c_attn_gate_proj_w8.
 
+# Quick diagnostic so the error log tells us whether outbound HTTPS is the issue.
+echo "=== network sanity ==="
+curl -sS -o /dev/null -w "wandb api HTTP %{http_code} (time %{time_total}s)\n" \
+    --max-time 15 https://api.wandb.ai/ 2>&1 || echo "curl to api.wandb.ai FAILED (network unreachable)"
+echo "=== end network sanity ==="
+
+# WANDB_MODE=offline writes runs to ./wandb/offline-run-* and never phones home.
+# After the job finishes, sync them from the login node with:
+#   wandb sync wandb/offline-run-*
+WANDB_MODE=offline \
 RUN_ID=ablation7c_attn_gate_proj_w8_multiseed \
 GATE_ATTN_OUT=1 \
 GATE_ATTN_SRC=proj \
