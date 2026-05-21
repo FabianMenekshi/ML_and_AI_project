@@ -2,7 +2,7 @@
 #SBATCH --job-name=quant_design
 #SBATCH --output=/home/3241043/slurm_logs/quant_design_%j.out
 #SBATCH --error=/home/3241043/slurm_logs/quant_design_%j.err
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --account=3241043
