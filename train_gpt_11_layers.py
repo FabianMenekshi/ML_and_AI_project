@@ -933,6 +933,7 @@ def main() -> None:
                 entity="the-golfers",
                 name=run_id,
                 config=run_config,
+                mode="offline",
             )
 
         # -----------------------------

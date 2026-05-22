@@ -1211,6 +1211,7 @@ def main() -> None:
                 entity="the-golfers",
                 name=run_id,
                 config=run_config,
+                mode="offline",
             )
 
         train_loader = DistributedTokenLoader(args.train_files, rank, world_size, device)
