@@ -93,6 +93,14 @@ class Hyperparameters:
     gate_attn_out = bool(int(os.environ.get("GATE_ATTN_OUT", "1")))
     gate_attn_src = os.environ.get("GATE_ATTN_SRC", "proj")   # "proj" (raw x) | "q" (Q-proj, pre-RoPE)
     gate_width = int(os.environ.get("GATE_WIDTH", "8"))
+    # Which layers get the gate. Empty string (default) → all layers, matching abl8/abl8b.
+    # Comma-separated layer indices → gate only on those layers (abl8c synergy probes).
+    # Example: GATE_LAYERS="4,5,6,7,8" → gate only on the parallel-mode layers (psl=4).
+    _gate_layers_raw = os.environ.get("GATE_LAYERS", "").strip()
+    gate_layers: list[int] | None = (
+        [int(x) for x in _gate_layers_raw.split(",") if x.strip()]
+        if _gate_layers_raw else None
+    )
 
     val_batch_size = int(os.environ.get("VAL_BATCH_SIZE", 524_288))
     val_loss_every = int(os.environ.get("VAL_LOSS_EVERY", 500))
@@ -689,6 +697,7 @@ class GPT(nn.Module):
         gate_attn_out: bool = False,
         gate_attn_src: str = "proj",
         gate_width: int = 8,
+        gate_layers: list[int] | None = None,
     ):
         super().__init__()
         if recur_target not in ("attn", "mlp", "both"):
@@ -702,9 +711,14 @@ class GPT(nn.Module):
         self.recur_target = recur_target
         self.recur_times = recur_times
         # Attention gate config — passed down to every Block.
+        # When gate_layers is None and gate_attn_out is True, gate is enabled on ALL layers
+        # (abl8/abl8b default). When gate_layers is a list, gate is enabled only on those
+        # specific layer indices (abl8c synergy probes). gate_layers without gate_attn_out=True
+        # has no effect (no gate is constructed anywhere).
         self.gate_attn_out = gate_attn_out
         self.gate_attn_src = gate_attn_src
         self.gate_width = gate_width
+        self.gate_layers = frozenset(gate_layers) if gate_layers is not None else None
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
@@ -712,12 +726,20 @@ class GPT(nn.Module):
         self.skip_weights = nn.Parameter(
             torch.ones(self.num_skip_weights, model_dim, dtype=torch.float32)
         )
+        # Per-layer gate decision: enabled iff global gate_attn_out AND (gate_layers is None
+        # OR the layer's index is in gate_layers).
+        def _layer_gate(i: int) -> bool:
+            if not gate_attn_out:
+                return False
+            if gate_layers is None:
+                return True
+            return i in gate_layers
         self.blocks = nn.ModuleList([
             Block(
                 model_dim, num_heads, num_kv_heads, mlp_mult, rope_base, qk_gain_init,
-                gate_attn_out=gate_attn_out, gate_attn_src=gate_attn_src, gate_width=gate_width,
+                gate_attn_out=_layer_gate(i), gate_attn_src=gate_attn_src, gate_width=gate_width,
             )
-            for _ in range(num_layers)
+            for i in range(num_layers)
         ])
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else CastedLinear(model_dim, vocab_size, bias=False)
@@ -921,6 +943,7 @@ def run_one(
     gate_attn_out = args.gate_attn_out
     gate_attn_src = args.gate_attn_src
     gate_width = args.gate_width
+    gate_layers = args.gate_layers
 
     def log0(msg: str, console: bool = True) -> None:
         if not master_process:
@@ -936,12 +959,15 @@ def run_one(
     gate_tag = (
         f"gate{gate_attn_src}_w{gate_width}" if gate_attn_out else "gate_disabled"
     )
+    if gate_attn_out and gate_layers is not None:
+        gate_tag = gate_tag + "_L" + "_".join(str(l) for l in sorted(gate_layers))
     run_id = f"{args.base_run_id}_{psl_tag}_recur{layers_tag}_{args.recur_target}_{gate_tag}_seed{seed}"
     log0(f"\n{'='*100}")
     log0(f"ABLATION 8 (Gate × PR × DR)  psl={parallel_start_layer}  asym={parallel_asym_init}  "
          f"recur_layers={sorted(args.recur_layers)}  recur_target={args.recur_target}  "
          f"recur_times={args.recur_times}  gate={gate_attn_out}  src={gate_attn_src}  "
-         f"width={gate_width}  seed={seed}")
+         f"width={gate_width}  gate_layers={sorted(gate_layers) if gate_layers is not None else 'ALL'}  "
+         f"seed={seed}")
     log0(f"  run_id={run_id}")
     log0(f"{'='*100}")
 
@@ -972,6 +998,7 @@ def run_one(
         gate_attn_out=gate_attn_out,
         gate_attn_src=gate_attn_src,
         gate_width=gate_width,
+        gate_layers=gate_layers,
     ).to(device).bfloat16()
     for module in base_model.modules():
         if isinstance(module, CastedLinear):
@@ -1045,6 +1072,8 @@ def run_one(
             "gate_attn_out": gate_attn_out,
             "gate_attn_src": gate_attn_src,
             "gate_width": gate_width,
+            "gate_layers": sorted(gate_layers) if gate_layers is not None else None,
+            "gate_layers_count": len(gate_layers) if gate_layers is not None else args.num_layers,
             "gate_params": n_gate_params,
         })
         wandb.init(
@@ -1330,6 +1359,7 @@ def main() -> None:
         print(f"  gate_attn_out         : {args.gate_attn_out}")
         print(f"  gate_attn_src         : {args.gate_attn_src}")
         print(f"  gate_width            : {args.gate_width}")
+        print(f"  gate_layers           : {args.gate_layers if args.gate_layers is not None else 'ALL'}")
         print(f"  seeds                 : {args.seeds}")
         print(f"  iterations / warmdown : {args.iterations} / {args.warmdown_iters}")
         print(f"  total runs            : {len(args.seeds)}")
