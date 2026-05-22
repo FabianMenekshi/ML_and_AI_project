@@ -9,6 +9,8 @@
 #SBATCH --partition=stud
 #SBATCH --qos=stud
 #SBATCH --gpus=1
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=antonio.honsell@studbocconi.it
 
 mkdir -p /home/3199937/slurm_logs
 module load miniconda3
@@ -50,9 +52,20 @@ python --version
 #                                  on the winning width.
 #   - both >= 1.2970 → stop. The gate doesn't compose; headline stays at PR × DR.
 
+# Compute nodes on this cluster have been intermittently unable to reach api.wandb.ai
+# (see abl7d_w8 failures). WANDB_MODE=offline writes runs to ./wandb/offline-run-*
+# and never phones home. After the job finishes, sync from the LOGIN node with:
+#   wandb sync wandb/offline-run-*
+# Quick network diagnostic so the error log tells us if outbound HTTPS is the issue.
+echo "=== network sanity ==="
+curl -sS -o /dev/null -w "wandb api HTTP %{http_code} (time %{time_total}s)\n" \
+    --max-time 15 https://api.wandb.ai/ 2>&1 || echo "curl to api.wandb.ai FAILED (network unreachable)"
+echo "=== end network sanity ==="
+
 # =============================================================================
 # RUN 1 — Triple stack with width=8 (abl7d standalone winner)
 # =============================================================================
+WANDB_MODE=offline \
 RUN_ID=ablation8_gate_pr_dr_w8 \
 PARALLEL_START_LAYER=4 \
 PARALLEL_ASYM_INIT=0 \
@@ -73,6 +86,7 @@ python3 train_gpt_ablation8_gate_pr_dr.py
 # =============================================================================
 # RUN 2 — Triple stack with width=12 (leaderboard default)
 # =============================================================================
+WANDB_MODE=offline \
 RUN_ID=ablation8_gate_pr_dr_w12 \
 PARALLEL_START_LAYER=4 \
 PARALLEL_ASYM_INIT=0 \
