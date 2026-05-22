@@ -17,7 +17,7 @@ eval "$(conda shell.bash hook)"
 conda activate golf
 python --version
 
-RUN_ID=GPTQ_LQER_int6_int7_rank4_top3_group32_asym \
+RUN_ID=GPTQ_LQER_int6_int7_rank4_top3_group32_asym_brotli \
 ITERATIONS=5000 \
 MAX_WALLCLOCK_SECONDS=0 \
 WARMDOWN_ITERS=750 \
