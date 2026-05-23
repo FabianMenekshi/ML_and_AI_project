@@ -1,18 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=combined_mixed_qat_L11
-#SBATCH --output=/home/3199937/slurm_logs/combined_mixed_qat_L11_%j.out
-#SBATCH --error=/home/3199937/slurm_logs/combined_mixed_qat_L11_%j.err
+#SBATCH --output=/home/3245806/slurm_logs/combined_mixed_qat_L11_%j.out
+#SBATCH --error=/home/3245806/slurm_logs/combined_mixed_qat_L11_%j.err
 #SBATCH --time=08:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --account=3199937
+#SBATCH --account=3245806
 #SBATCH --partition=stud
 #SBATCH --qos=stud
 #SBATCH --gpus=1
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=antonio.honsell@studbocconi.it
+#SBATCH --mail-user=matteo.mellogrand@studbocconi.it
 
-mkdir -p /home/3199937/slurm_logs
+mkdir -p /home/3245806/slurm_logs
 module load miniconda3
 
 eval "$(conda shell.bash hook)"
@@ -28,7 +28,6 @@ python --version
 #   - QAT enabled from step 1250 (25% of 5000)
 #   - Embedding QAT at int8
 
-WANDB_MODE=offline \
 RUN_ID=combined_pr_dr_gate_mixed_qat_L11 \
 NUM_LAYERS=11 \
 PARALLEL_START_LAYER=4 \
