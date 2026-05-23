@@ -44,7 +44,7 @@ class Hyperparameters:
     val_files = os.path.join(data_path, "fineweb_val_*.bin")
     tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
     base_run_id = os.environ.get("RUN_ID", str(uuid.uuid4()))
-    seeds = [int(s) for s in os.environ.get("SEEDS", "1337").split(",")]
+    seeds = [int(s) for s in os.environ.get("SEEDS", "1337, 42, 123").split(",")]
 
     # Validation cadence and batch size. Validation always uses the full fineweb_val split.
     val_batch_size = int(os.environ.get("VAL_BATCH_SIZE", 524_288))
