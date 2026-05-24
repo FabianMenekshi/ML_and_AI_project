@@ -704,9 +704,13 @@ class GPT(nn.Module):
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
-        self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
+        # self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
+        # self.skip_attn_res = nn.ModuleList(
+        #     [BlockAttentionResidual(model_dim) for _ in range(self.num_skip_weights)]
+        # )
+        self.num_skip_attn_layers = self.num_decoder_layers
         self.skip_attn_res = nn.ModuleList(
-            [BlockAttentionResidual(model_dim) for _ in range(self.num_skip_weights)]
+            [BlockAttentionResidual(model_dim) for _ in range(self.num_skip_attn_layers)]
         )
         self.blocks = nn.ModuleList(
             [
