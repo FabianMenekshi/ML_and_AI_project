@@ -1403,6 +1403,13 @@ def run_one(
     # Serialisation + quantised final eval — mixed int6/int8 naive quantization.
     model_quant_path = f"final_model_{run_id}.mixed_int6_int8.ptz"
 
+    # Save the raw fp32 weights BEFORE quantization, so post-training experiments
+    # (AWQ, GPTQ, different bitwidths, etc.) can be run without retraining.
+    if master_process:
+        fp32_ckpt_path = f"final_model_{run_id}.fp32.pt"
+        torch.save(base_model.state_dict(), fp32_ckpt_path)
+        log0(f"Saved fp32 checkpoint: {fp32_ckpt_path}")
+
     log0(f"[QUANT] Mixed quantization: recurrent layers {sorted(args.recur_layers)} → int{args.recur_quant_bits}, "
          f"others → int{args.matrix_quant_bits}, embedding → {args.embed_quant_mode}, "
          f"compression → {args.compression_method}")
