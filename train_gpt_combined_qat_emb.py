@@ -7,9 +7,6 @@ quantization scheme:
   - Non-recurrent layers → int6 (saves space)
   - Recurrent layers (2,3,4,5) → int8 (avoids error compounding through reuse)
   - QAT from 25% of training to adapt weights to the mixed scheme
-
-This replaces the previous GPTQ+LQER approach, which was too aggressive for
-the recurrent architecture (1.33 BPB vs 1.30 baseline at 16 MB).
 """
 
 from __future__ import annotations
@@ -62,19 +59,26 @@ class Hyperparameters:
     # Symmetric init confirmed in abl4b — asym init does not help and adds variance.
     parallel_asym_init = bool(int(os.environ.get("PARALLEL_ASYM_INIT", "0")))
 
-    # Depth recurrence — fixed at the multi-seed-validated winner ([2,3,4,5] target=both).
+    # Depth recurrence — fixed at the L=11 multi-seed-validated winner ([3,4,5] target=both).
+    # 9L winner was [2,3,4,5] (abl5f, 1.3022 ± 0.0029). At L=11 the U-Net hinge shifts
+    # and a re-ablation (this branch's final_model_combined_ablation notebook) found:
+    #   [3,4,5]   3-seed mean: 1.2811 ± 0.0004  (15.36 MB)
+    #   [2,3,4,5] 6-seed mean: 1.2809 ± 0.0022  (15.82 MB)
+    # tied bpb (0.1σ pooled), 5× tighter seed std, 0.46 MB smaller artifact → [3,4,5] wins.
     recur_layers: list[int] = [
-        int(x) for x in os.environ.get("RECUR_LAYERS", "2,3,4,5").split(",") if x.strip()
+        int(x) for x in os.environ.get("RECUR_LAYERS", "3,4,5").split(",") if x.strip()
     ]
     recur_target = os.environ.get("RECUR_TARGET", "both")  # "attn" | "mlp" | "both"
     recur_times = int(os.environ.get("RECUR_TIMES", "1"))
 
-    # Attention output gate (abl7d winner). Default width=8; override to 12 to test
-    # the leaderboard's preferred width. Gate is zero-init so the script is bit-identical
-    # to abl6 (PR × DR) when GATE_ATTN_OUT=0.
+    # Attention output gate. Default width=12 — the composition winner at both 9L (abl8b,
+    # 1.2927 ± 0.0007) and L=11 (1.2812 ± 0.0007, 5-seed). Standalone abl7d found w=8
+    # better in isolation (1.3042 ± 0.0004), but the composition flip favours w=12 when
+    # stacked with PR + DR (super-additive at w=12, only linear at w=8). Gate is zero-init
+    # so USE_XSA=0 / GATE_ATTN_OUT=0 paths remain bit-identical to baseline.
     gate_attn_out = bool(int(os.environ.get("GATE_ATTN_OUT", "1")))
     gate_attn_src = os.environ.get("GATE_ATTN_SRC", "proj")   # "proj" (raw x) | "q" (Q-proj, pre-RoPE)
-    gate_width = int(os.environ.get("GATE_WIDTH", "8"))
+    gate_width = int(os.environ.get("GATE_WIDTH", "12"))
     # Which layers get the gate. Empty string (default) → all layers, matching abl8/abl8b.
     # Comma-separated layer indices → gate only on those layers (abl8c synergy probes).
     # Example: GATE_LAYERS="4,5,6,7,8" → gate only on the parallel-mode layers (psl=4).
@@ -96,9 +100,10 @@ class Hyperparameters:
     train_seq_len = int(os.environ.get("TRAIN_SEQ_LEN", 1024))
     max_wallclock_seconds = float(os.environ.get("MAX_WALLCLOCK_SECONDS", 0.0))
 
-    # Model shape (matches baseline)
+    # Model shape — NUM_LAYERS default updated 9 → 11 (the depth at which mixed-quant +
+    # protected-recur-layers + brotli fits under the 16 MB cap and reaches 1.2812 ± 0.0007).
     vocab_size = int(os.environ.get("VOCAB_SIZE", 1024))
-    num_layers = int(os.environ.get("NUM_LAYERS", 9))
+    num_layers = int(os.environ.get("NUM_LAYERS", 11))
     num_kv_heads = int(os.environ.get("NUM_KV_HEADS", 4))
     model_dim = int(os.environ.get("MODEL_DIM", 512))
     num_heads = int(os.environ.get("NUM_HEADS", 8))
@@ -684,7 +689,7 @@ class CausalSelfAttention(nn.Module):
         qk_gain_init: float,
         gate_attn_out: bool = False,
         gate_attn_src: str = "proj",
-        gate_width: int = 8,
+        gate_width: int = 12,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -754,7 +759,7 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, dim: int, num_heads: int, num_kv_heads: int, mlp_mult: int,
                  rope_base: float, qk_gain_init: float,
-                 gate_attn_out: bool = False, gate_attn_src: str = "proj", gate_width: int = 8):
+                 gate_attn_out: bool = False, gate_attn_src: str = "proj", gate_width: int = 12):
         super().__init__()
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
@@ -805,7 +810,7 @@ class GPT(nn.Module):
         recur_times: int = 1,
         gate_attn_out: bool = False,
         gate_attn_src: str = "proj",
-        gate_width: int = 8,
+        gate_width: int = 12,
         gate_layers: list[int] | None = None,
     ):
         super().__init__()
