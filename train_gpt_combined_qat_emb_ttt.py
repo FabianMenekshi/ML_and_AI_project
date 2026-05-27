@@ -8,7 +8,7 @@ gradient descent on a self-supervised reconstruction objective — as the
 sequence is being processed. The state is reset per-batch but flows causally
 across token-chunks within a sequence.
 
-Inner loop (test-time training):
+Inner loop (test-time training, with truncated BPTT for stability):
   - input x ∈ R^{B×T×d_model}  →  q, k, v ∈ R^{B×T×d_state}  via learned projections
   - partition into chunks of size C: each chunk has C tokens
   - state W_0 = ttt_W_init (learned), inner_lr = ttt_inner_lr (learned scalar)
@@ -17,7 +17,20 @@ Inner loop (test-time training):
         v_hat_i  = k_i · W_{i-1}.T                    (predicted v from k)
         grad_W   = (v_hat_i - v_i).T · k_i / C        (gradient of ||v_hat - v||²)
         W_i      = W_{i-1} - inner_lr · grad_W        (one inner gradient step)
+        W_i      = W_i.detach()                        (TRUNCATED BPTT — see note below)
   - return out_proj(concat(y_0, ..., y_{n_chunks-1}))
+
+Truncated BPTT (Option A fix, 2026-05-28):
+  The initial implementation (without W.detach()) created a backward graph
+  of depth n_chunks (16 or 32) through the chunked W updates. The outer
+  gradient on the q/k/v projections compounded through that chain and
+  exploded by 50–6000× after the first optimizer step, sending all 6
+  configurations of the original sweep to NaN by step 200. Detaching W
+  after each chunk's update truncates the chain to depth 1: each chunk's
+  output sees only its own q's gradient and its own (k, v)'s gradient via
+  the inner update. The per-chunk inner adaptation is then a "frozen black
+  box" to the next chunk's backward pass, which is the standard truncated-
+  BPTT pattern and matches the behaviour Sun et al. report at small scale.
 
 Outer loop (standard training): the projections (q/k/v/out), the init W_init,
 and the inner_lr are all trained by the usual main-loss gradient descent. The
@@ -859,7 +872,16 @@ class TTTLinear(nn.Module):
             vi_hat = ki @ W.transpose(-1, -2)
             grad_W = (vi_hat - vi).transpose(-1, -2) @ ki * inv_C
             W = W - inner_lr * grad_W
-
+            # Truncated BPTT (Option A fix): detach W after each chunk's update so the
+            # backward graph for chunk i+1 does NOT extend through chunk i's update.
+            # Without this, the chunked inner loop creates an O(n_chunks)-deep chain of
+            # matrix products in the backward pass, and outer gradients explode after one
+            # optimizer step (we observed 50–6000× gradient blowup at step 2 across all 6
+            # untruncated configurations). With detach, each chunk's output's gradient
+            # only flows back to that chunk's own q/k/v — outer training still learns the
+            # projections, but the per-chunk inner update is treated as a frozen black box
+            # by the next chunk's backward pass.
+            W = W.detach()
         out_state = torch.stack(outputs, dim=1).reshape(B, T, self.d_state)
         return self.out_proj(out_state)
 
