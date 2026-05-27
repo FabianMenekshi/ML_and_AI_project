@@ -1128,6 +1128,12 @@ def run_one(
 ) -> None:
     """One full training+eval cycle for a single seed of the Gate × PR × DR triple stack."""
 
+    # Reset class-level QAT state at the start of every seed. Without this, the
+    # `CastedLinear._qat_enabled` flag (a class attribute) would persist across seeds
+    # within one Python invocation — making seeds 2..N start with QAT already active
+    # from step 0 instead of from qat_start_step.
+    CastedLinear._qat_enabled = False
+
     parallel_start_layer = args.parallel_start_layer
     parallel_asym_init = args.parallel_asym_init
     gate_attn_out = args.gate_attn_out
