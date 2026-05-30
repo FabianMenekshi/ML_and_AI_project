@@ -1,5 +1,7 @@
 # <h1 align="center">*<ins>Ablation Study for the Parameter-Golf Challenge</ins>*</h1>
 
+<img src="block_comparison_diagram.jpg" width="100%">
+
 ## Authors:
 - Antonio Honsell (antonio.honsell@studbocconi.it)
 - Andrea Lamonarca (andrea.lamonarca@studbocconi.it)
@@ -80,7 +82,7 @@ pip install -r requirements.txt
 
 ## Data and tokenizer
 
-The training scripts expect pre-tokenized FineWeb shards and a SentencePiece tokenizer. These files are not present in our repo, but can be easily downlaoded from `https://github.com/openai/parameter-golf`
+The training scripts expect pre-tokenized FineWeb shards and a SentencePiece tokenizer. These files are not present in our repo, but can be easily downloaded from `https://github.com/openai/parameter-golf`
 
 ## Running experiments
 
