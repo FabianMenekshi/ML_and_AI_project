@@ -10,6 +10,9 @@
 - Fabian Menekshi (fabian.menekshi@studbocconi.it)
 - Kevin Shaqiri (kevin.shaqiri@studbocconi.it)
 
+
+## Introduction 
+
 This repository contains the code, notebooks, and analysis for the Machine Learning and Artificial Intelligence course project at Bocconi University.
 
 We tackle a particular variant of OpenAI's Parameter Golf Challenge: train a GPT language model under a fixed compute budget, compress the final model artifact under a strict memory budget, and minimise validation bits-per-byte (BPB) on a held-out FineWeb validation set.
@@ -48,6 +51,8 @@ The final model combines:
 .
 ├── baseline_model.py
 ├── requirements.txt
+├── final_report.pdf
+├── LICENSE
 ├── notebooks/
 │   ├── architecture_notebooks/
 │   ├── quantization_notebooks/
