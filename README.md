@@ -1,6 +1,6 @@
 # <h1 align="center">*<ins>Ablation Study for the Parameter-Golf Challenge</ins>*</h1>
 
-<img src="block_comparison_diagram.jpg" width="100%">
+<img src="model_comparison_diagram.jpg" width="100%">
 
 ## Authors:
 - Antonio Honsell (antonio.honsell@studbocconi.it)
