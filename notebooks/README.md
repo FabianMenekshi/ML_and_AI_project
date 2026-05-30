@@ -37,22 +37,9 @@ notebooks/
     └── utils.py
 ```
 
-## How to use these notebooks
-
-Start Jupyter from the repository root:
-
-```bash
-jupyter notebook
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
 Some notebooks may expect local experiment logs, Weights & Biases exports, or saved CSV/JSON summaries. These generated artifacts are not necessarily included in the repository.
 
 ## Notes
+- Some notebooks may expect local experiment logs, Weights & Biases exports, or saved CSV/JSON summaries. These generated artifacts are not necessarily included in the repository.
 
-The notebooks are analysis-first: they are meant to explain, compare, and visualise experiments. The training code itself lives in `src/`.
+- The notebooks are analysis-first: they are meant to explain, compare, and visualise experiments. The training code itself lives in `src/`.
